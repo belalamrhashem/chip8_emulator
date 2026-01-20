@@ -1,6 +1,7 @@
 #include <string.h>
 #include <SDL3/SDL.h>
 #include <stdio.h>
+#include < stdint.h >
 
 unsigned short opcode; //2 byte opcode
 unsigned char memory[4096]; //4KB memory
@@ -21,10 +22,36 @@ unsigned short sp; //Stack top pointer
 
 unsigned char key[16]; //Current state of keypad (4x4 grid, 1 is pressed and 0 is released)
 
+//Adjustables
+unsigned int speed_factor = 10;
 
+//Fontset
+unsigned char chip8_fontset[80] =
+{
+  0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
+  0x20, 0x60, 0x20, 0x20, 0x70, // 1
+  0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
+  0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
+  0x90, 0x90, 0xF0, 0x10, 0x10, // 4
+  0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
+  0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
+  0xF0, 0x10, 0x20, 0x40, 0x40, // 7
+  0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
+  0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
+  0xF0, 0x90, 0xF0, 0x90, 0x90, // A
+  0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
+  0xF0, 0x80, 0x80, 0x80, 0xF0, // C
+  0xE0, 0x90, 0x90, 0x90, 0xE0, // D
+  0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
+  0xF0, 0x80, 0xF0, 0x80, 0x80  // F
+};
 
 
 int main(int argc, char* argv[]) {
+
+	//Initialise and clear
+	init();
+
 	// 1. Initialize SDL
 	if (SDL_Init(SDL_INIT_VIDEO) < 0) {
 		SDL_Log("SDL could not initialize! SDL error: %s", SDL_GetError());
@@ -61,8 +88,9 @@ int main(int argc, char* argv[]) {
 
 	while (running) {
 
-		//Input
+		uint64_t start = SDL_GetTicks();
 
+		//Input
 		while (SDL_PollEvent(&event)) {
 
 			//Quitting
@@ -137,10 +165,27 @@ int main(int argc, char* argv[]) {
 
 		}
 		//CPU
-
-		//Render
+		for (int i = 0; i < speed_factor; i++)
+		{
+			cycle();
+		}
 
 		//Timers
+		if (delay_timer > 0) {
+			delay_timer--;
+		}
+		if (sound_timer > 0) {
+			sound_timer--;
+		}
+
+		//Render
+		draw(texture, renderer);
+
+		//FPS
+		uint64_t end = SDL_GetTicks();
+		float elapsedMS = (float)(end - start);
+
+		if (elapsedMS < 16.667f) SDL_Delay((uint32_t)(16.667f - elapsedMS));
 	}
 
 	// Cleanup
@@ -150,6 +195,71 @@ int main(int argc, char* argv[]) {
 	SDL_Quit();
 
 	return 0;
+}
+
+void init() {
+	//Initialise variables:
+	I = 0;
+	pc = 0x200;
+	delay_timer = 0;
+	sound_timer = 0;
+	sp = 0;
+	opcode = 0;
+
+	//Clearing
+	memset(display, 0, sizeof(display));
+	memset(stack, 0, sizeof(stack));
+	memset(V, 0, sizeof(V));
+	memset(memory, 0, sizeof(memory));
+	memset(key, 0, sizeof(key));
+	
+
+	//Initialise fontset
+	
+	for (int i = 0; i < sizeof(chip8_fontset); i++)
+	{
+		memory[0x50 + i] = chip8_fontset[i];
+	}
+}
+
+void cycle() {
+	//Combines fetch() and decode_execute()
+	opcode = fetch();
+	pc += 2;
+	decode_execute(opcode);
+}
+
+void draw(SDL_Texture* texture, SDL_Renderer* renderer) {
+
+	//Buffer
+	uint32_t pixels[64*32];
+
+	//Fill the buffer
+	for (int row = 0; row < 32; row++)
+	{
+		for (int col = 0; col < 64; col++)
+		{
+			int index = row * 64 + col;
+			if (display[row][col] == 1) {
+				pixels[index] = 0xFFFFFFFF;
+			}
+			else {
+				pixels[index] = 0xFF000000;
+			}
+		}
+	}
+
+	//Upload to texture
+	SDL_UpdateTexture(texture, NULL, pixels, 256);
+
+	//Clear screen (good practice)
+	SDL_RenderClear(renderer);
+
+	//Copy texture to renderer
+	SDL_RenderTexture(renderer, texture, NULL, NULL);
+
+	//Present to screen
+	SDL_RenderPresent(renderer);
 }
 
 int fetch() {
@@ -164,6 +274,21 @@ void timers() {
 	if (sound_timer != 0) {
 		sound_timer -= 1;
 	}
+}
+
+int load_rom(char* filename) {
+	FILE* rom = fopen(filename, 'rb');
+
+	if (rom == NULL) {
+		printf("Failed to open ROM: %s\n", filename);
+		return 0;
+	}
+
+	fseek(rom, 0, SEEK_END);
+	long rom_size = ftell(rom);
+	rewind(rom);
+
+	fread(&memory[0x200], 1, rom_size, rom);
 }
 
 void decode_execute(unsigned short opcode) {
@@ -384,7 +509,7 @@ void decode_execute(unsigned short opcode) {
 			I += V[x];
 			break;
 		case 0x29:
-			I = (V[x] & 0x0F) * 5;
+			I = 0x50 + ((V[x] & 0x0F) * 5);
 			break;
 		case 0x33:
 			memory[I] = V[x] / 100;
