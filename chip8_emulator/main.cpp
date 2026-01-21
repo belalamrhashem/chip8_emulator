@@ -9,7 +9,7 @@
 void init();
 void cycle();
 void draw(SDL_Texture* texture, SDL_Renderer* renderer);
-int load_rom(char* filename);
+int load_rom(const char* filename);
 unsigned short fetch();
 void decode_execute(unsigned short opcode);
 
@@ -35,7 +35,7 @@ unsigned short sp; //Stack top pointer
 unsigned char key[16]; //Current state of keypad (4x4 grid, 1 is pressed and 0 is released)
 
 //Adjustables
-unsigned int speed_factor = 10;
+int speed_factor = 10;
 
 //Fontset
 unsigned char chip8_fontset[80] =
@@ -68,7 +68,7 @@ int main(int argc, char* argv[]) {
 	if (!load_rom("Pong.ch8")) return -1;
 
 	// 1. Initialize SDL
-	if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+	if (!SDL_Init(SDL_INIT_VIDEO)) {
 		SDL_Log("SDL could not initialize! SDL error: %s", SDL_GetError());
 		return 1;
 	}
@@ -181,6 +181,10 @@ int main(int argc, char* argv[]) {
 			}
 
 		}
+
+		//Save previous display for smoothness
+		memcpy(display_prev, display, sizeof(display));
+
 		//CPU
 		for (int i = 0; i < speed_factor; i++)
 		{
@@ -200,8 +204,6 @@ int main(int argc, char* argv[]) {
 		draw(texture, renderer);
 		drawFlag = 0;
 		}
-
-		memcpy(display_prev, display, sizeof(display));
 
 		//FPS
 		uint64_t end = SDL_GetTicks();
@@ -289,12 +291,13 @@ unsigned short fetch() {
 	return opcode;
 }
 
-int load_rom(char* filename) {
+int load_rom(const char* filename) {
 	//Open file
-	FILE* rom = fopen(filename, "rb");
+	FILE* rom = nullptr; //Set to null pointer initially
+	errno_t err = fopen_s(&rom, filename, "rb"); //returns error, and automatically opens file at rom pointer
 
 	//If failed to open: (e.g. filename doesn't exist)
-	if (rom == NULL) {
+	if (err != 0 || rom == nullptr) {
 		printf("Failed to open ROM: %s\n", filename);
 		return 0;
 	}
@@ -458,6 +461,7 @@ void decode_execute(unsigned short opcode) {
 		break;
 
 	case 0xD:
+	{
 		V[0xF] = 0; //Reset collision flag
 		drawFlag = 1; //Set draw flag
 
@@ -488,7 +492,7 @@ void decode_execute(unsigned short opcode) {
 			}
 		}
 		break;
-
+	}
 	case 0xE:
 		switch (kk) {
 		case 0x9E:
