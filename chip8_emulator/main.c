@@ -1,11 +1,22 @@
-#include <string.h>
 #include <SDL3/SDL.h>
-#include <stdio.h>
-#include < stdint.h >
+#include <stdio.h>  
+#include <stdlib.h> 
+#include <time.h>   
+#include <string.h>
+#include <stdint.h>
+
+//Funcs
+void init();
+void cycle();
+void draw(SDL_Texture* texture, SDL_Renderer* renderer);
+int load_rom(char* filename);
+unsigned short fetch();
+void decode_execute(unsigned short opcode);
 
 unsigned short opcode; //2 byte opcode
 unsigned char memory[4096]; //4KB memory
 unsigned char display[32][64];
+unsigned char display_prev[32][64]; // for smoothness
 
 //Registers
 unsigned char V[16]; //General purpose registers 1-16 (16 is flag)
@@ -15,6 +26,7 @@ unsigned short pc; //program counter
 //Timers, count down to 0 at 60Hz
 unsigned char delay_timer;
 unsigned char sound_timer; //Buzzer sounds when this timer reaches 0
+unsigned char drawFlag; //Indicates if we need to redraw the screen
 
 //Stack, for jump instructions
 unsigned short stack[16]; //Stores up to 16 PC values
@@ -52,6 +64,9 @@ int main(int argc, char* argv[]) {
 	//Initialise and clear
 	init();
 
+	//Load ROM
+	if (!load_rom("Pong.ch8")) return -1;
+
 	// 1. Initialize SDL
 	if (SDL_Init(SDL_INIT_VIDEO) < 0) {
 		SDL_Log("SDL could not initialize! SDL error: %s", SDL_GetError());
@@ -60,7 +75,7 @@ int main(int argc, char* argv[]) {
 
 	// 2. Create the Window
 	// In SDL3, we just pass Title, Width, Height, and Flags.
-	SDL_Window* window = SDL_CreateWindow("Chip-8 Emulator", 640, 320, 0);
+	SDL_Window* window = SDL_CreateWindow("Chip-8 Emulator", 1280, 640, 0);
 	if (window == NULL) {
 		SDL_Log("Window could not be created! SDL error: %s", SDL_GetError());
 		return 1;
@@ -73,6 +88,8 @@ int main(int argc, char* argv[]) {
 		SDL_Log("Renderer could not be created! SDL error: %s", SDL_GetError());
 		return 1;
 	}
+	SDL_SetRenderLogicalPresentation(renderer, 64, 32, SDL_LOGICAL_PRESENTATION_STRETCH);
+
 
 	// 4. Create the Texture
 	SDL_Texture* texture = SDL_CreateTexture(
@@ -179,7 +196,12 @@ int main(int argc, char* argv[]) {
 		}
 
 		//Render
+		if (drawFlag){
 		draw(texture, renderer);
+		drawFlag = 0;
+		}
+
+		memcpy(display_prev, display, sizeof(display));
 
 		//FPS
 		uint64_t end = SDL_GetTicks();
@@ -240,7 +262,7 @@ void draw(SDL_Texture* texture, SDL_Renderer* renderer) {
 		for (int col = 0; col < 64; col++)
 		{
 			int index = row * 64 + col;
-			if (display[row][col] == 1) {
+			if (display[row][col] == 1 || display_prev[row][col] == 1) {
 				pixels[index] = 0xFFFFFFFF;
 			}
 			else {
@@ -262,33 +284,39 @@ void draw(SDL_Texture* texture, SDL_Renderer* renderer) {
 	SDL_RenderPresent(renderer);
 }
 
-int fetch() {
+unsigned short fetch() {
 	opcode = memory[pc] << 8 | memory[pc + 1];
 	return opcode;
 }
 
-void timers() {
-	if (delay_timer != 0) {
-		delay_timer -= 1;
-	}
-	if (sound_timer != 0) {
-		sound_timer -= 1;
-	}
-}
-
 int load_rom(char* filename) {
-	FILE* rom = fopen(filename, 'rb');
+	//Open file
+	FILE* rom = fopen(filename, "rb");
 
+	//If failed to open: (e.g. filename doesn't exist)
 	if (rom == NULL) {
 		printf("Failed to open ROM: %s\n", filename);
 		return 0;
 	}
 
+	//Set cursor to end to get number of elements then return to start
 	fseek(rom, 0, SEEK_END);
 	long rom_size = ftell(rom);
 	rewind(rom);
 
+	//Does it fit?
+	if (rom_size > (4096 - 512)) { //total RAM minus reserved RAM
+		printf("Don't fit cuh");
+		fclose(rom);
+		return 0;
+	}
+
+	//Read the contents into the buffer (memory array)
 	fread(&memory[0x200], 1, rom_size, rom);
+
+	//Close and end
+	fclose(rom);
+	return 1;	
 }
 
 void decode_execute(unsigned short opcode) {
@@ -431,6 +459,7 @@ void decode_execute(unsigned short opcode) {
 
 	case 0xD:
 		V[0xF] = 0; //Reset collision flag
+		drawFlag = 1; //Set draw flag
 
 		//Fix wrapping issues
 		unsigned short x_coord = V[x] % 64;
@@ -442,7 +471,7 @@ void decode_execute(unsigned short opcode) {
 			for (int col = 0; col < 8; col++) {
 				if ((pixel_data & (0x80 >> col)) != 0) { //This condition checks each bit by AND masking with 1000 0000
 
-					if ((x_coord + col >= 64) | (y_coord + row >= 32)) {
+					if ((x_coord + col >= 64) || (y_coord + row >= 32)) {
 						continue;
 					}
 
