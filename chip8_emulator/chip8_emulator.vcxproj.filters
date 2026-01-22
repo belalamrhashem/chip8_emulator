@@ -66,4 +66,7 @@
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
+  <ItemGroup>
+    <Font Include="Fonts\PS2P_menu.ttf" />
+  </ItemGroup>
 </Project>

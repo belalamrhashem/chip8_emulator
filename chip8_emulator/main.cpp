@@ -10,12 +10,20 @@
 #include <string.h>
 #include <stdint.h>
 
+//ImGui
+ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings;
+
 //App
 enum State {
 	STATE_MENU,
 	STATE_EMULATE
 };
 State currentState = STATE_MENU;
+
+struct buttonSize {
+	float x;
+	float y;
+};
 
 
 //Funcs
@@ -84,6 +92,14 @@ void onFileSelect(void* userdata, const char* const* filelist, int filter) {
 	}
 }
 
+void displayCentredText(const char* text, float windowWidth) {
+	const char* titleText = text;//Pointer to title text
+	float textWidth = ImGui::CalcTextSize(titleText).x; //Calculate its width
+
+	ImGui::SetCursorPosX((windowWidth - textWidth) * 0.5f); //Centring
+	ImGui::Text("%s", titleText); //Display text
+}
+
 int main(int argc, char* argv[]) {
 
 	//Initialise and clear
@@ -129,12 +145,31 @@ int main(int argc, char* argv[]) {
 	//Context
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
-	ImGui::GetIO().FontGlobalScale = 4.0f; // scale font
-	ImGuiIO& io = ImGui::GetIO(); (void)io;
+
+	//Aesthetics
+	
+	ImGuiStyle& style = ImGui::GetStyle();
+	style.WindowRounding = 0.0f; // Sharp corners
+	style.FrameRounding = 0.0f;
+
+	ImVec4* colors = style.Colors;
+	colors[ImGuiCol_Text] = ImVec4(0.0f, 1.0f, 0.0f, 1.0f);          // Matrix Green
+	colors[ImGuiCol_WindowBg] = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);      // Black Background
+	colors[ImGuiCol_Button] = ImVec4(0.0f, 0.5f, 0.0f, 1.0f);        // Darker Green Button
+	colors[ImGuiCol_ButtonHovered] = ImVec4(0.0f, 0.7f, 0.0f, 1.0f); // Brighter on Hover
+	colors[ImGuiCol_ButtonActive] = ImVec4(0.0f, 0.9f, 0.0f, 1.0f);  // Brightest on Click
+
+	//Font
+	ImGuiIO& io = ImGui::GetIO();
+
+	io.FontGlobalScale = 4.0f; // scale font
 	io.ConfigFlags = ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
 
-	//Style
-	ImGui::StyleColorsDark(); //dark theme
+	ImFont* titleFont = io.Fonts->AddFontFromFileTTF("Fonts/PS2P_menu.ttf", 12.0f);
+	ImFont* smallFont = io.Fonts->AddFontFromFileTTF("Fonts/PS2P_menu.ttf", 8.0f);
+
+	(void)io;
+
 
 	//Backends
 	ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
@@ -239,12 +274,7 @@ int main(int argc, char* argv[]) {
 		ImGui_ImplSDL3_NewFrame();
 		ImGui::NewFrame();
 
-		//Create ImGUI window
 		
-		ImGui::Begin("Chip-8 Emulator Settings");
-		ImGui::Text("Emulation Speed:");
-		ImGui::SliderInt("##Speed Factor", &speed_factor, 1, 20);
-		ImGui::End();
 
 
 		//MENU BLOCK
@@ -254,25 +284,70 @@ int main(int argc, char* argv[]) {
 			const ImGuiViewport* viewport = ImGui::GetMainViewport();
 			ImGui::SetNextWindowPos(viewport->WorkPos);
 			ImGui::SetNextWindowSize(viewport->WorkSize);
-			ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings;
 			ImGui::Begin("CHIP-8 Emulator", NULL, window_flags);
 
-			//Text and buttons
-			ImGui::Text("Select a ROM or modify settings to continue");
-			ImGui::Separator();
-			
-			//Load ROM
+			float windowWidth = ImGui::GetWindowSize().x;
 
-			static const SDL_DialogFileFilter filters[] = {
-			{"Chip 8 ROM", "ch8"}
-			};
+			//Title text
+			{
+				displayCentredText("Select a ROM or modify settings to continue", windowWidth);
 
-
-			if (ImGui::Button("Load ROM")) {
-				printf("Button clicked");
-				SDL_ShowOpenFileDialog(onFileSelect, NULL, window, filters, 1, NULL, false);
+				ImGui::Separator(); // Horizontal line to separate title
+				ImGui::Dummy(ImVec2(0.0f, 100.0f)); //Spacing before next UI item
 			}
 
+			//Speed Slider
+			{
+				displayCentredText("Emulation Speed", windowWidth);
+
+				float sliderWidth = 500.0f;
+				ImGui::SetCursorPosX((windowWidth - 500.0f) * 0.5f); //Centring
+				ImGui::SetNextItemWidth(sliderWidth); //Forces slider width
+
+				ImGui::SliderInt("##Speed Factor", &speed_factor, 5, 15); //Sets the slider, text, value to modify, min/max values
+
+				ImGui::Dummy(ImVec2(0.0f, 100.0f)); //Spacing before next UI item
+			}
+
+
+			//Load ROM button
+			{
+				ImGui::PushFont(smallFont);
+
+				//Set button size
+				struct buttonSize size;
+				size.x = 300.0f;
+				size.y = 100.0f;
+
+
+				//Filter file select
+				static const SDL_DialogFileFilter filters[] = {
+				{"Chip 8 ROM", "ch8"} //Only shows chip 8 ROM files
+				};
+
+				ImGui::SetCursorPosX((windowWidth - size.x) * 0.5f); //Centring
+
+				if (ImGui::Button("Load ROM", ImVec2(size.x, size.y))) {
+					//printf("Button clicked\n"); was for debugging
+					SDL_ShowOpenFileDialog(onFileSelect, NULL, window, filters, 1, NULL, false); //File select menu to callback function
+				}
+
+				ImGui::PopFont();
+
+				ImGui::Dummy(ImVec2(0.0f, 1000.0f)); //Spacing before next UI item
+			}
+
+			//Instructions
+			{
+				ImGui::PushFont(smallFont);
+
+				displayCentredText("Emulator uses 4x4 grid of keys 1-4 by 1-z", windowWidth);
+				displayCentredText("Press Esc to exit or go back to menu", windowWidth);
+
+				ImGui::PopFont();
+			}
+
+			//End window
 			ImGui::End();
 
 		}
@@ -323,7 +398,7 @@ int main(int argc, char* argv[]) {
 		uint64_t end = SDL_GetTicks();
 		float elapsedMS = (float)(end - start);
 
-		if (elapsedMS < 16.667f) SDL_Delay((uint32_t)(16.667f - elapsedMS));
+		if (elapsedMS < 16.66f) SDL_Delay((uint32_t)(16.66f - elapsedMS));
 	}
 
 	// Cleanup
