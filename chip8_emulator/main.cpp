@@ -1,14 +1,27 @@
 #include <SDL3/SDL.h>
+
+#include <imgui.h>
+#include "imgui_impl_sdl3.h"
+#include "imgui_impl_sdlrenderer3.h"
+
 #include <stdio.h>  
 #include <stdlib.h> 
 #include <time.h>   
 #include <string.h>
 #include <stdint.h>
 
+//App
+enum State {
+	STATE_MENU,
+	STATE_EMULATE
+};
+State currentState = STATE_MENU;
+
+
 //Funcs
 void init();
 void cycle();
-void draw(SDL_Texture* texture, SDL_Renderer* renderer);
+void update_texture(SDL_Texture* texture);
 int load_rom(const char* filename);
 unsigned short fetch();
 void decode_execute(unsigned short opcode);
@@ -58,6 +71,18 @@ unsigned char chip8_fontset[80] =
   0xF0, 0x80, 0xF0, 0x80, 0x80  // F
 };
 
+void onFileSelect(void* userdata, const char* const* filelist, int filter) {
+	if (filelist && filelist[0]) {
+		const char* selectedFile = filelist[0];
+		if (!load_rom(selectedFile)) {
+			printf("Failed to load ROM: %s\n", selectedFile);
+			currentState = STATE_MENU; //Menu mode
+		}
+		else {
+			currentState = STATE_EMULATE; //Game mode
+		}
+	}
+}
 
 int main(int argc, char* argv[]) {
 
@@ -65,7 +90,7 @@ int main(int argc, char* argv[]) {
 	init();
 
 	//Load ROM
-	if (!load_rom("Pong.ch8")) return -1;
+	if (!load_rom("ROM/Pong.ch8")) return -1;
 
 	// 1. Initialize SDL
 	if (!SDL_Init(SDL_INIT_VIDEO)) {
@@ -76,6 +101,7 @@ int main(int argc, char* argv[]) {
 	// 2. Create the Window
 	// In SDL3, we just pass Title, Width, Height, and Flags.
 	SDL_Window* window = SDL_CreateWindow("Chip-8 Emulator", 1280, 640, 0);
+	SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
 	if (window == NULL) {
 		SDL_Log("Window could not be created! SDL error: %s", SDL_GetError());
 		return 1;
@@ -88,8 +114,6 @@ int main(int argc, char* argv[]) {
 		SDL_Log("Renderer could not be created! SDL error: %s", SDL_GetError());
 		return 1;
 	}
-	SDL_SetRenderLogicalPresentation(renderer, 64, 32, SDL_LOGICAL_PRESENTATION_STRETCH);
-
 
 	// 4. Create the Texture
 	SDL_Texture* texture = SDL_CreateTexture(
@@ -98,6 +122,23 @@ int main(int argc, char* argv[]) {
 		SDL_TEXTUREACCESS_STREAMING,
 		64, 32
 	);
+
+
+	//IMGUI:
+
+	//Context
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGui::GetIO().FontGlobalScale = 4.0f; // scale font
+	ImGuiIO& io = ImGui::GetIO(); (void)io;
+	io.ConfigFlags = ImGuiConfigFlags_NavEnableKeyboard; // Enable Keyboard Controls
+
+	//Style
+	ImGui::StyleColorsDark(); //dark theme
+
+	//Backends
+	ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
+	ImGui_ImplSDLRenderer3_Init(renderer);
 
 	// Main loop:
 	char running = 1;
@@ -110,100 +151,172 @@ int main(int argc, char* argv[]) {
 		//Input
 		while (SDL_PollEvent(&event)) {
 
+			ImGui_ImplSDL3_ProcessEvent(&event); //Pass event to ImGui
+
+
 			//Quitting
-			if (event.type == SDL_EVENT_QUIT) {
-				running = 0; //If user requests to quit, break the loop.
-			}
-
-			//Keyboard input
-			if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) {
-
-				//Pressed or released?
-				char keyState;
-				if (event.type == SDL_EVENT_KEY_DOWN) {
-					keyState = 1;
+			if (event.type == SDL_EVENT_QUIT) running = 0;
+			if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE) {
+				if (currentState == STATE_EMULATE){
+					currentState = STATE_MENU;
 				}
-				else if (event.type == SDL_EVENT_KEY_UP) {
-					keyState = 0;
-				}
-
-				//Which key was pressed/released?
-				switch (event.key.key) {
-				case SDLK_1:
-					key[0x1] = keyState;
-					break;
-				case SDLK_2:
-					key[0x2] = keyState;
-					break;
-				case SDLK_3:
-					key[0x3] = keyState;
-					break;
-				case SDLK_4:
-					key[0xC] = keyState;
-					break;
-				case SDLK_Q:
-					key[0x4] = keyState;
-					break;
-				case SDLK_W:
-					key[0x5] = keyState;
-					break;
-				case SDLK_E:
-					key[0x6] = keyState;
-					break;
-				case SDLK_R:
-					key[0xD] = keyState;
-					break;
-				case SDLK_A:
-					key[0x7] = keyState;
-					break;
-				case SDLK_S:
-					key[0x8] = keyState;
-					break;
-				case SDLK_D:
-					key[0x9] = keyState;
-					break;
-				case SDLK_F:
-					key[0xE] = keyState;
-					break;
-				case SDLK_Z:
-					key[0xA] = keyState;
-					break;
-				case SDLK_X:
-					key[0x0] = keyState;
-					break;
-				case SDLK_C:
-					key[0xB] = keyState;
-					break;
-				case SDLK_V:
-					key[0xF] = keyState;
-					break;
+				else {
+					running = 0;
 				}
 			}
 
+			if (currentState == STATE_EMULATE) {
+				//Keyboard input
+				if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP) {
+
+					//Pressed or released?
+					char keyState;
+					if (event.type == SDL_EVENT_KEY_DOWN) {
+						keyState = 1;
+					}
+					else if (event.type == SDL_EVENT_KEY_UP) {
+						keyState = 0;
+					}
+
+					//Which key was pressed/released?
+					switch (event.key.key) {
+					case SDLK_1:
+						key[0x1] = keyState;
+						break;
+					case SDLK_2:
+						key[0x2] = keyState;
+						break;
+					case SDLK_3:
+						key[0x3] = keyState;
+						break;
+					case SDLK_4:
+						key[0xC] = keyState;
+						break;
+					case SDLK_Q:
+						key[0x4] = keyState;
+						break;
+					case SDLK_W:
+						key[0x5] = keyState;
+						break;
+					case SDLK_E:
+						key[0x6] = keyState;
+						break;
+					case SDLK_R:
+						key[0xD] = keyState;
+						break;
+					case SDLK_A:
+						key[0x7] = keyState;
+						break;
+					case SDLK_S:
+						key[0x8] = keyState;
+						break;
+					case SDLK_D:
+						key[0x9] = keyState;
+						break;
+					case SDLK_F:
+						key[0xE] = keyState;
+						break;
+					case SDLK_Z:
+						key[0xA] = keyState;
+						break;
+					case SDLK_X:
+						key[0x0] = keyState;
+						break;
+					case SDLK_C:
+						key[0xB] = keyState;
+						break;
+					case SDLK_V:
+						key[0xF] = keyState;
+						break;
+					}
+				}	
+			}
+
 		}
 
-		//Save previous display for smoothness
-		memcpy(display_prev, display, sizeof(display));
+		//Start ImGUI frame
+		ImGui_ImplSDLRenderer3_NewFrame();
+		ImGui_ImplSDL3_NewFrame();
+		ImGui::NewFrame();
 
-		//CPU
-		for (int i = 0; i < speed_factor; i++)
-		{
-			cycle();
+		//Create ImGUI window
+		
+		ImGui::Begin("Chip-8 Emulator Settings");
+		ImGui::Text("Emulation Speed:");
+		ImGui::SliderInt("##Speed Factor", &speed_factor, 1, 20);
+		ImGui::End();
+
+
+		//MENU BLOCK
+		if (currentState == STATE_MENU) {
+
+			//Starting the window
+			const ImGuiViewport* viewport = ImGui::GetMainViewport();
+			ImGui::SetNextWindowPos(viewport->WorkPos);
+			ImGui::SetNextWindowSize(viewport->WorkSize);
+			ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings;
+			ImGui::Begin("CHIP-8 Emulator", NULL, window_flags);
+
+			//Text and buttons
+			ImGui::Text("Select a ROM or modify settings to continue");
+			ImGui::Separator();
+			
+			//Load ROM
+
+			static SDL_DialogFileFilter filters[] = {
+			{"Chip 8 ROM", "*.ch8"}
+			};
+
+
+			if (ImGui::Button("Load ROM")) {
+				SDL_ShowOpenFileDialog(onFileSelect, NULL, window, filters, 1, NULL, false);
+			}
+
+			ImGui::End();
+
 		}
 
-		//Timers
-		if (delay_timer > 0) {
-			delay_timer--;
-		}
-		if (sound_timer > 0) {
-			sound_timer--;
+
+		//EMU BLOCK
+
+		
+		else if (currentState == STATE_EMULATE) {
+
+			//Save previous display for smoothness
+			memcpy(display_prev, display, sizeof(display));
+
+			//CPU
+			for (int i = 0; i < speed_factor; i++)
+			{
+				cycle();
+			}
+
+			//Timers
+			if (delay_timer > 0) {
+				delay_timer--;
+			}
+			if (sound_timer > 0) {
+				sound_timer--;
+			}
+
+			//Update texture
+			if (drawFlag) {
+				update_texture(texture);
+				drawFlag = 0;
+			}
+			
 		}
 
 		//Render
-		if (drawFlag){
-		draw(texture, renderer);
-		drawFlag = 0;
-		}
+		SDL_RenderClear(renderer);
+		if (currentState == STATE_EMULATE) SDL_RenderTexture(renderer, texture, NULL, NULL);;
+
+		//Draw ImGUI
+		ImGui::Render();
+		ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
+
+		//Present to screen
+		SDL_RenderPresent(renderer);
 
 		//FPS
 		uint64_t end = SDL_GetTicks();
@@ -213,6 +326,10 @@ int main(int argc, char* argv[]) {
 	}
 
 	// Cleanup
+	ImGui_ImplSDLRenderer3_Shutdown();
+	ImGui_ImplSDL3_Shutdown();
+	ImGui::DestroyContext();
+
 	SDL_DestroyTexture(texture);
 	SDL_DestroyRenderer(renderer);
 	SDL_DestroyWindow(window);
@@ -253,7 +370,7 @@ void cycle() {
 	decode_execute(opcode);
 }
 
-void draw(SDL_Texture* texture, SDL_Renderer* renderer) {
+void update_texture(SDL_Texture* texture) {
 
 	//Buffer
 	uint32_t pixels[64*32];
@@ -277,13 +394,7 @@ void draw(SDL_Texture* texture, SDL_Renderer* renderer) {
 	SDL_UpdateTexture(texture, NULL, pixels, 256);
 
 	//Clear screen (good practice)
-	SDL_RenderClear(renderer);
-
-	//Copy texture to renderer
-	SDL_RenderTexture(renderer, texture, NULL, NULL);
-
-	//Present to screen
-	SDL_RenderPresent(renderer);
+	//SDL_RenderClear(renderer);
 }
 
 unsigned short fetch() {
@@ -566,3 +677,4 @@ void decode_execute(unsigned short opcode) {
 	}
 
 }
+
