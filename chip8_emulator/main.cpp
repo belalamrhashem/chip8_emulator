@@ -105,9 +105,6 @@ int main(int argc, char* argv[]) {
 	//Initialise and clear
 	init();
 
-	//Load ROM
-	if (!load_rom("ROM/Pong.ch8")) return -1;
-
 	// 1. Initialize SDL
 	if (!SDL_Init(SDL_INIT_VIDEO)) {
 		SDL_Log("SDL could not initialize! SDL error: %s", SDL_GetError());
@@ -479,6 +476,9 @@ unsigned short fetch() {
 }
 
 int load_rom(const char* filename) {
+	//Reset emulator
+	init();
+
 	//Open file
 	FILE* rom = nullptr; //Set to null pointer initially
 	errno_t err = fopen_s(&rom, filename, "rb"); //returns error, and automatically opens file at rom pointer
