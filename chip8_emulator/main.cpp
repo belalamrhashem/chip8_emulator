@@ -263,12 +263,13 @@ int main(int argc, char* argv[]) {
 			
 			//Load ROM
 
-			static SDL_DialogFileFilter filters[] = {
-			{"Chip 8 ROM", "*.ch8"}
+			static const SDL_DialogFileFilter filters[] = {
+			{"Chip 8 ROM", "ch8"}
 			};
 
 
 			if (ImGui::Button("Load ROM")) {
+				printf("Button clicked");
 				SDL_ShowOpenFileDialog(onFileSelect, NULL, window, filters, 1, NULL, false);
 			}
 
